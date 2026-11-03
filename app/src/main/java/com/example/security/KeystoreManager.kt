@@ -38,17 +38,10 @@ class KeystoreManager(context: Context) {
         const val KEY_SYSTEM_PROMPT = "system_prompt_custom"
     }
 
-    init {
-        try {
-            getOrCreateSecretKey()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
     private fun getOrCreateSecretKey(): SecretKey? {
         return try {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
+            keyStore.load(null)
             if (keyStore.containsAlias(KEY_ALIAS)) {
                 val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
                 if (entry != null) return entry.secretKey
@@ -105,7 +98,10 @@ class KeystoreManager(context: Context) {
     }
 
     fun decryptAndGet(key: String, defaultValue: String = ""): String {
-        val encoded = prefs.getString(key, null) ?: return prefs.getString(key + "_plain", defaultValue) ?: defaultValue
+        val encoded = prefs.getString(key, null)
+        if (encoded.isNullOrEmpty()) {
+            return prefs.getString(key + "_plain", defaultValue) ?: defaultValue
+        }
         try {
             val combined = Base64.decode(encoded, Base64.NO_WRAP)
             if (combined.size < 12) return defaultValue

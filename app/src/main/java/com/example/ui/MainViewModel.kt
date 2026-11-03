@@ -17,6 +17,7 @@ import com.example.integrations.GitHubApiClient
 import com.example.security.KeystoreManager
 import com.example.termux.ConnectionStatus
 import com.example.termux.TermuxManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,20 +57,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            termuxManager.testConnection()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                termuxManager.testConnection()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     fun testConnection() {
-        viewModelScope.launch {
-            termuxManager.testConnection()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                termuxManager.testConnection()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     fun sendMessage(userText: String) {
         if (userText.isBlank()) return
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val userMsg = ChatMessageEntity(sender = "user", content = userText)
             db.chatDao().insertMessage(userMsg)
             agentEngine.runAgentLoop(userText) { msg ->
@@ -83,29 +92,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearChat() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             db.chatDao().clearAllMessages()
         }
     }
 
     fun getBootstrapOneLiner(): String {
-        val keys = termuxManager.getOrGenerateSSHKeys()
-        return BootstrapGenerator.generateOneLinerCommand(keys.publicKeyAuthorizedFormat)
+        return try {
+            val keys = termuxManager.getOrGenerateSSHKeys()
+            BootstrapGenerator.generateOneLinerCommand(keys.publicKeyAuthorizedFormat)
+        } catch (e: Exception) {
+            "pkg update -y && pkg install -y openssh"
+        }
     }
 
     fun getBootstrapFullScript(): String {
-        val keys = termuxManager.getOrGenerateSSHKeys()
-        return BootstrapGenerator.generateFullScript(keys.publicKeyAuthorizedFormat)
+        return try {
+            val keys = termuxManager.getOrGenerateSSHKeys()
+            BootstrapGenerator.generateFullScript(keys.publicKeyAuthorizedFormat)
+        } catch (e: Exception) {
+            "#!/data/data/com.termux/files/usr/bin/bash\nsshd -p 8022"
+        }
     }
 
     fun restoreSnapshot(snapshot: SnapshotEntity) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             termuxManager.runShellCommand("cat << 'EOF' > \"${snapshot.filePath}\"\n${snapshot.originalContent}\nEOF")
         }
     }
 
     fun addMemoryNote(category: String, key: String, value: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             db.memoryNoteDao().insertOrUpdate(
                 MemoryNoteEntity(category = category, keyName = key, valueContent = value)
             )
@@ -113,7 +130,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteMemoryNote(id: Long) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             db.memoryNoteDao().deleteNote(id)
         }
     }
@@ -131,7 +148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun syncTokensToTermux() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val ghToken = keystoreManager.decryptAndGet(KeystoreManager.KEY_GITHUB_TOKEN)
             val cfToken = keystoreManager.decryptAndGet(KeystoreManager.KEY_CLOUDFLARE_TOKEN)
 
