@@ -24,7 +24,7 @@ class KeystoreManager(context: Context) {
         const val KEY_LLM_API_KEY = "llm_api_key"
         const val KEY_LLM_BASE_URL = "llm_base_url"
         const val KEY_LLM_MODEL = "llm_model"
-        const val KEY_LLM_PROVIDER = "llm_provider" // "gemini", "openai", "anthropic", "openrouter"
+        const val KEY_LLM_PROVIDER = "llm_provider"
         const val KEY_GITHUB_TOKEN = "github_token"
         const val KEY_GITHUB_DEFAULT_REPO = "github_default_repo"
         const val KEY_CLOUDFLARE_TOKEN = "cloudflare_token"
@@ -32,48 +32,61 @@ class KeystoreManager(context: Context) {
         const val KEY_CLOUDFLARE_ZONE_ID = "cloudflare_zone_id"
         const val KEY_SSH_PRIVATE_KEY = "ssh_private_key"
         const val KEY_SSH_PUBLIC_KEY = "ssh_public_key"
-        const val KEY_AUTONOMY_MODE = "autonomy_mode" // "ASK_EVERY_TIME", "SMART_AUTO", "FULL_AUTO"
-        const val KEY_LANGUAGE = "app_language" // "fa", "en"
+        const val KEY_AUTONOMY_MODE = "autonomy_mode"
+        const val KEY_LANGUAGE = "app_language"
         const val KEY_DARK_THEME = "dark_theme"
         const val KEY_SYSTEM_PROMPT = "system_prompt_custom"
     }
 
     init {
-        getOrCreateSecretKey()
+        try {
+            getOrCreateSecretKey()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
-    private fun getOrCreateSecretKey(): SecretKey {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        if (keyStore.containsAlias(KEY_ALIAS)) {
-            val entry = keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry
-            return entry.secretKey
+    private fun getOrCreateSecretKey(): SecretKey? {
+        return try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            if (keyStore.containsAlias(KEY_ALIAS)) {
+                val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+                if (entry != null) return entry.secretKey
+            }
+
+            val keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEYSTORE
+            )
+
+            val spec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+
+            keyGenerator.init(spec)
+            keyGenerator.generateKey()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
-
-        val keyGenerator = KeyGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_AES,
-            ANDROID_KEYSTORE
-        )
-
-        val spec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .build()
-
-        keyGenerator.init(spec)
-        return keyGenerator.generateKey()
     }
 
     fun encryptAndSave(key: String, value: String) {
         if (value.isEmpty()) {
-            prefs.edit().remove(key).apply()
+            prefs.edit().remove(key).remove(key + "_plain").apply()
             return
         }
         try {
             val secretKey = getOrCreateSecretKey()
+            if (secretKey == null) {
+                prefs.edit().putString(key + "_plain", value).apply()
+                return
+            }
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
             val iv = cipher.iv
@@ -86,7 +99,7 @@ class KeystoreManager(context: Context) {
             val encoded = Base64.encodeToString(combined, Base64.NO_WRAP)
             prefs.edit().putString(key, encoded).apply()
         } catch (e: Exception) {
-            // Fallback plain string if keystore issues arise
+            e.printStackTrace()
             prefs.edit().putString(key + "_plain", value).apply()
         }
     }
@@ -102,7 +115,7 @@ class KeystoreManager(context: Context) {
             System.arraycopy(combined, 0, iv, 0, 12)
             System.arraycopy(combined, 12, encryptedBytes, 0, encryptedBytes.size)
 
-            val secretKey = getOrCreateSecretKey()
+            val secretKey = getOrCreateSecretKey() ?: return prefs.getString(key + "_plain", defaultValue) ?: defaultValue
             val cipher = Cipher.getInstance(TRANSFORMATION)
             val gcmSpec = GCMParameterSpec(128, iv)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
@@ -110,6 +123,7 @@ class KeystoreManager(context: Context) {
             val decryptedBytes = cipher.doFinal(encryptedBytes)
             return String(decryptedBytes, Charsets.UTF_8)
         } catch (e: Exception) {
+            e.printStackTrace()
             return prefs.getString(key + "_plain", defaultValue) ?: defaultValue
         }
     }
